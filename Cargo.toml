@@ -1,5 +1,5 @@
 [package]
-authors = ["dolly-parseton <dolly-parseton@gmail.com>"]
+authors = ["dolly-parseton <dolly.parseton@gmail.com>"]
 edition = "2018"
 name = "libregf-rs"
 version = "0.1.0"

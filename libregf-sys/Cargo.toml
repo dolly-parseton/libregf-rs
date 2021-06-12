@@ -1,5 +1,5 @@
 [package]
-authors = ["dolly-parseton <dolly-parseton@gmail.com>"]
+authors = ["dolly-parseton <dolly.parseton@gmail.com>"]
 build = "build.rs"
 edition = "2018"
 name = "libregf-sys"

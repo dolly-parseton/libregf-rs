@@ -72,14 +72,15 @@ mod unsafe_fn {
         match libregf_check_file_signature(chars, &mut err) == 1 {
             true => match libregf_file_initialize(&mut file.inner, &mut err) == 1 {
                 true => {
-                    if libregf_file_open(
+                    match libregf_file_open(
                         file.inner,
                         chars,
                         libregf_get_access_flags_read(),
                         &mut err,
-                    ) != 1
+                    ) == -1
                     {
-                        *error = RegfError::from_ptr(err);
+                        true => *error = RegfError::from_ptr(err),
+                        false => (), // File inner is set upon successful run.
                     }
                 }
                 false => *error = RegfError::from_ptr(err),

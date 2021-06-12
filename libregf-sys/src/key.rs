@@ -1,5 +1,5 @@
 use crate::{handle_err_and_option, value::RegfValue, RegfError};
-use std::{error, ptr};
+use std::{mem, ptr};
 
 #[derive(Debug)]
 pub struct RegfKey {
@@ -113,18 +113,26 @@ mod unsafe_fn {
         error: &mut Option<RegfError>,
     ) {
         let mut err: *mut libregf_error_t = ptr::null_mut();
-        let mut size = 0;
-        let name_ptr = ptr::null_mut();
+        // https://github.com/libyal/libregf/blob/main/documentation/Windows%20NT%20Registry%20File%20(REGF)%20format.asciidoc#41-named-key - size 256, * 4 to account for unicode
+        let mut name_ptr: [u8; 256 * 4] = mem::zeroed();
+        let mut size: u64 = 0;
         match libregf_key_get_name_size(key.inner, &mut size, &mut err) {
             -1 => *error = RegfError::from_ptr(err),
-            _ => match libregf_key_get_name(key.inner, name_ptr, size, &mut err) {
+            1 => match libregf_key_get_name(
+                key.inner,
+                name_ptr.as_mut_ptr() as *mut u8,
+                size,
+                &mut err,
+            ) {
                 -1 => *error = RegfError::from_ptr(err),
-                _ => {
-                    *name = std::str::from_utf8(std::slice::from_raw_parts(name_ptr, size as usize))
+                1 => {
+                    *name = std::str::from_utf8(&name_ptr[..size as usize])
                         .map(|s| s.to_string())
                         .ok()
                 }
+                _ => unreachable!(),
             },
+            _ => unreachable!(),
         }
     }
     pub unsafe fn _key_class_name(
@@ -134,13 +142,18 @@ mod unsafe_fn {
     ) {
         let mut err = ptr::null_mut();
         let mut size = 0;
-        let name_ptr = ptr::null_mut();
+        let mut name_ptr: [u8; 256 * 4] = mem::zeroed();
         match libregf_key_get_class_name_size(key.inner, &mut size, &mut err) {
             -1 => *error = RegfError::from_ptr(err),
-            _ => match libregf_key_get_class_name(key.inner, name_ptr, size, &mut err) {
+            _ => match libregf_key_get_class_name(
+                key.inner,
+                name_ptr.as_mut_ptr() as *mut u8,
+                size,
+                &mut err,
+            ) {
                 -1 => *error = RegfError::from_ptr(err),
                 1 => {
-                    *name = std::str::from_utf8(std::slice::from_raw_parts(name_ptr, size as usize))
+                    *name = std::str::from_utf8(&name_ptr[..size as usize])
                         .map(|s| s.to_string())
                         .ok()
                 }
@@ -155,16 +168,20 @@ mod unsafe_fn {
     ) {
         let mut err = ptr::null_mut();
         let mut size = 0;
-        let name_ptr = ptr::null_mut();
+        let mut string_ptr: [u8; 256] = mem::zeroed();
         match libregf_key_get_security_descriptor_size(key.inner, &mut size, &mut err) {
             -1 => *error = RegfError::from_ptr(err),
-            _ => match libregf_key_get_security_descriptor(key.inner, name_ptr, size, &mut err) {
+            _ => match libregf_key_get_security_descriptor(
+                key.inner,
+                string_ptr.as_mut_ptr() as *mut u8,
+                size,
+                &mut err,
+            ) {
                 -1 => *error = RegfError::from_ptr(err),
                 1 => {
-                    *security_descriptor =
-                        std::str::from_utf8(std::slice::from_raw_parts(name_ptr, size as usize))
-                            .map(|s| s.to_string())
-                            .ok()
+                    *security_descriptor = std::str::from_utf8(&string_ptr[..size as usize])
+                        .map(|s| s.to_string())
+                        .ok()
                 }
                 _ => (),
             },

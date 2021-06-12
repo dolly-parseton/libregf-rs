@@ -9,14 +9,16 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 pub mod file;
 pub mod key;
 pub mod value;
+#[macro_use]
+mod wrap_macros;
 
 use std::{error, fmt, ptr};
 
 pub fn handle_err_and_option<T, E>(v: Option<T>, e: Option<E>, o: E) -> Result<T, E> {
     match (e, v) {
-        (Some(error), _) => Err(error),
         (None, Some(t)) => Ok(t),
         (None, None) => Err(o),
+        (Some(error), _) => Err(error),
     }
 }
 

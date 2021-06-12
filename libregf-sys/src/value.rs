@@ -1,5 +1,40 @@
-use crate::{handle_err_and_option, key::RegfKey, RegfError, LIBREGF_VALUE_TYPES};
-use std::ptr;
+use crate::{handle_err_and_option, key::RegfKey, RegfError};
+use std::{mem, ptr};
+
+#[derive(Debug)]
+pub enum RegfType {
+    Undefined = 0,
+    String = 1,
+    ExpandableString = 2,
+    Binary = 3,
+    Int32LE = 4,
+    Int32BE = 5,
+    SymbolicLink = 6,
+    MultiValueString = 7,
+    ResourceList = 8,
+    FullResourceDescription = 9,
+    ResourceRequirementsList = 10,
+    Int64LE = 11,
+}
+
+impl From<u32> for RegfType {
+    fn from(r#type: u32) -> Self {
+        match r#type {
+            1 => Self::String,
+            2 => Self::ExpandableString,
+            3 => Self::Binary,
+            4 => Self::Int32LE,
+            5 => Self::Int32BE,
+            6 => Self::SymbolicLink,
+            7 => Self::MultiValueString,
+            8 => Self::ResourceList,
+            9 => Self::FullResourceDescription,
+            10 => Self::ResourceRequirementsList,
+            11 => Self::Int64LE,
+            _ => Self::Undefined,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct RegfValue {
@@ -71,7 +106,7 @@ impl RegfValue {
         )
     }
     //
-    pub fn get_type(&self) -> Result<LIBREGF_VALUE_TYPES, RegfError> {
+    pub fn get_type(&self) -> Result<RegfType, RegfError> {
         let mut r#type = None;
         let mut error = None;
         unsafe { unsafe_fn::_value_type(self, &mut r#type, &mut error) };
@@ -81,10 +116,6 @@ impl RegfValue {
             RegfError::function_returned_none("_value_type"),
         )
     }
-    //
-    // pub fn get_data(&self) -> Result<Vec<u8>, RegfError> {
-    //     //
-    // }
     pub fn get_u32(&self) -> Result<u32, RegfError> {
         let mut data = None;
         let mut error = None;
@@ -96,6 +127,16 @@ impl RegfValue {
         let mut error = None;
         unsafe { unsafe_fn::_value_u64(self, &mut data, &mut error) };
         handle_err_and_option(data, error, RegfError::function_returned_none("_value_u64"))
+    }
+    pub fn get_binary(&self) -> Result<&[u8], RegfError> {
+        let mut data = None;
+        let mut error = None;
+        unsafe { unsafe_fn::_value_binary(self, &mut data, &mut error) };
+        handle_err_and_option(
+            data,
+            error,
+            RegfError::function_returned_none("_value_binary"),
+        )
     }
     pub fn get_string(&self) -> Result<String, RegfError> {
         let mut string = None;
@@ -123,7 +164,6 @@ mod unsafe_fn {
     //
     use super::*;
     use crate::*;
-    use std::ffi;
     //
     pub unsafe fn _value_free(value: &mut RegfValue, error: &mut Option<RegfError>) {
         let mut err = ptr::null_mut();
@@ -158,28 +198,70 @@ mod unsafe_fn {
         }
     }
     //
-    pub unsafe fn _value_string(
+    pub unsafe fn _value_binary(
         value: &RegfValue,
-        string: &mut Option<String>,
+        binary: &mut Option<&[u8]>,
         error: &mut Option<RegfError>,
     ) {
         let mut err: *mut libregf_error_t = ptr::null_mut();
         let mut size = 0;
-        if libregf_value_get_value_utf8_string_size(value.inner, &mut size, &mut err) == -1 {
-            *error = RegfError::from_ptr(err);
-        } else {
-            let string_ptr = ptr::null_mut();
-            if libregf_value_get_value_utf8_string(value.inner, string_ptr, size, &mut err) == -1 {
-                *error = RegfError::from_ptr(err);
-            } else {
-                if let Ok(s) =
-                    std::str::from_utf8(std::slice::from_raw_parts(string_ptr, size as usize))
-                {
-                    *string = Some(s.to_string());
-                }
-            }
+        let mut binary_ptr: [u8; 16383 * 4] = mem::zeroed();
+        match libregf_value_get_value_binary_data_size(value.inner, &mut size, &mut err) {
+            -1 => *error = RegfError::from_ptr(err),
+            _ => match size == 0 {
+                false => match libregf_value_get_value_binary_data(
+                    value.inner,
+                    binary_ptr.as_mut_ptr() as *mut u8,
+                    size,
+                    &mut err,
+                ) {
+                    -1 => *error = RegfError::from_ptr(err),
+                    _ => {
+                        *binary = Some(std::slice::from_raw_parts_mut(
+                            binary_ptr.as_mut_ptr() as *mut u8,
+                            size as usize,
+                        ))
+                    }
+                },
+                true => *binary = Some(&[]),
+            },
         }
     }
+    //
+    read_string!(
+        _value_string,
+        libregf_value_get_value_utf8_string_size,
+        libregf_value_get_value_utf8_string
+    );
+    //
+    // pub unsafe fn _value_string(
+    //     value: &RegfValue,
+    //     string: &mut Option<String>,
+    //     error: &mut Option<RegfError>,
+    // ) {
+    //     let mut err: *mut libregf_error_t = ptr::null_mut();
+    //     let mut size = 0;
+    //     let mut string_ptr: [u8; 265 * 4] = mem::zeroed();
+    //     match libregf_value_get_value_utf8_string_size(value.inner, &mut size, &mut err) {
+    //         -1 => *error = RegfError::from_ptr(err),
+    //         _ => match size == 0 {
+    //             false => match libregf_value_get_value_utf8_string(
+    //                 value.inner,
+    //                 string_ptr.as_mut_ptr() as *mut u8,
+    //                 size,
+    //                 &mut err,
+    //             ) {
+    //                 -1 => *error = RegfError::from_ptr(err),
+    //                 _ => {
+    //                     *string = std::str::from_utf8(&string_ptr[..size as usize])
+    //                         .map(|s| s.to_string())
+    //                         .ok()
+    //                 }
+    //             },
+    //             true => *string = Some("".to_string()),
+    //         },
+    //     }
+    // }
     //
     pub unsafe fn _value_multi_string(
         value: &RegfValue,
@@ -188,26 +270,54 @@ mod unsafe_fn {
     ) {
         let mut err: *mut libregf_error_t = ptr::null_mut();
         let mut n = 0;
-        let strings_ptr = ptr::null_mut();
+        let mut strings_ptr: [*mut libregf_multi_string_t; 16383 * 4] = mem::zeroed();
+        // let mut strings_ptr: *mut libregf_multi_string_t = ptr::null_mut();
         match libregf_multi_string_get_number_of_strings(value.inner, &mut n, &mut err) {
             -1 => *error = RegfError::from_ptr(err),
-            _ => match libregf_value_get_value_multi_string(value.inner, strings_ptr, &mut err) {
+            _ => {
+                match libregf_value_get_value_multi_string(
+                    value.inner,
+                    strings_ptr.as_mut_ptr(), // as *mut *mut libregf_multi_string_t,
+                    &mut err,
+                ) {
+                    -1 => *error = RegfError::from_ptr(err),
+                    _ => (), // string_ptrs = Some(Vec::from_raw_parts(strings_ptr, n as usize, n as usize)),
+                }
+            }
+        }
+
+        for i in 0..n {
+            let mut size = 0;
+            match libregf_multi_string_get_utf8_string_size(
+                strings_ptr.as_mut_ptr() as *mut isize,
+                i,
+                &mut size,
+                &mut err,
+            ) {
                 -1 => *error = RegfError::from_ptr(err),
                 _ => {
-                    let mut raw = Vec::from_raw_parts(strings_ptr, n as usize, n as usize);
-                    *strings = Some(
-                        raw.drain(..)
-                            .map(|r| {
-                                ffi::CString::from_raw(*r as *mut i8)
-                                    .to_str()
-                                    .map(|s| s.to_string())
-                            })
-                            .filter(|s| s.is_ok())
-                            .map(|s| s.unwrap())
-                            .collect(),
-                    )
+                    let mut string_ptr: [u8; 16383 * 4] = mem::zeroed();
+                    match libregf_multi_string_get_utf8_string(
+                        strings_ptr[i as usize],
+                        i,
+                        string_ptr.as_mut_ptr() as *mut u8,
+                        size,
+                        &mut err,
+                    ) {
+                        -1 => *error = RegfError::from_ptr(err),
+                        _ => {
+                            if strings.is_none() {
+                                *strings = Some(Vec::new())
+                            }
+                            if let Some(ref mut v) = strings {
+                                if let Ok(s) = std::str::from_utf8(&string_ptr[..size as usize]) {
+                                    v.push(s.to_string());
+                                }
+                            }
+                        }
+                    }
                 }
-            },
+            }
         }
     }
     //
@@ -224,29 +334,14 @@ mod unsafe_fn {
     //
     pub unsafe fn _value_type(
         value: &RegfValue,
-        r#type: &mut Option<LIBREGF_VALUE_TYPES>,
+        r#type: &mut Option<RegfType>,
         error: &mut Option<RegfError>,
     ) {
-        let mut type_value = 12;
+        let mut type_value = 0;
         let mut err = ptr::null_mut();
-        if libregf_value_get_value_type(value.inner, &mut type_value, &mut err) == -1 {
-            *error = RegfError::from_ptr(err);
-        } else {
-            *r#type = match type_value {
-                0 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_UNDEFINED),
-                1 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_STRING),
-                2 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_EXPANDABLE_STRING),
-                3 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_BINARY_DATA),
-                4 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_INTEGER_32BIT_LITTLE_ENDIAN),
-                5 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_INTEGER_32BIT_BIG_ENDIAN),
-                6 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_SYMBOLIC_LINK),
-                7 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_MULTI_VALUE_STRING),
-                8 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_RESOURCE_LIST),
-                9 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_FULL_RESOURCE_DESCRIPTOR),
-                10 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_RESOURCE_REQUIREMENTS_LIST),
-                11 => Some(LIBREGF_VALUE_TYPES::LIBREGF_VALUE_TYPE_INTEGER_64BIT_LITTLE_ENDIAN),
-                _ => None,
-            };
+        match libregf_value_get_value_type(value.inner, &mut type_value, &mut err) {
+            -1 => *error = RegfError::from_ptr(err),
+            _ => *r#type = Some(RegfType::from(type_value)),
         }
     }
     //
@@ -288,22 +383,27 @@ mod unsafe_fn {
     ) {
         let mut err: *mut libregf_error_t = ptr::null_mut();
         let mut size = 0;
-        if libregf_value_get_name_size(value.inner, &mut size, &mut err) == -1 {
-            println!("Bad name size {:?}", size);
-            *error = RegfError::from_ptr(err);
-        } else {
-            println!("Name len {:?}", size);
-            let name_ptr = ptr::null_mut();
-            if libregf_value_get_name(value.inner, name_ptr, size, &mut err) == -1 {
-                println!("Bad name {:?} / {:?} / {:?}", size, name_ptr, err);
-                *error = RegfError::from_ptr(err);
-            } else {
-                if let Ok(s) =
-                    std::str::from_utf8(std::slice::from_raw_parts(name_ptr, size as usize))
-                {
-                    *name = Some(s.to_string());
+        // https://github.com/libyal/libregf/blob/main/documentation/Windows%20NT%20Registry%20File%20(REGF)%20format.asciidoc#1-overview - 16383 * 4
+        let mut name_ptr: [u8; 16383 * 4] = mem::zeroed();
+        match libregf_value_get_name_size(value.inner, &mut size, &mut err) == 1 {
+            false => *error = RegfError::from_ptr(err),
+            true => match libregf_value_get_name(
+                value.inner,
+                name_ptr.as_mut_ptr() as *mut u8,
+                size,
+                &mut err,
+            ) == 1
+            {
+                false => *error = RegfError::from_ptr(err),
+                true => {
+                    *name = match size == 0 {
+                        true => Some("(default)".to_string()),
+                        false => std::str::from_utf8(&name_ptr[..size as usize])
+                            .map(|s| s.to_string())
+                            .ok(),
+                    }
                 }
-            }
+            },
         }
     }
 }

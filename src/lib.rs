@@ -1,16 +1,71 @@
 #[cfg(test)]
 mod tests {
     use std::path;
+
+    fn recurse(keys: &[libregf_sys::key::RegfKey]) {
+        for key in keys {
+            // println!("{:?}", key);
+            println!("name: {:?}", key.get_name());
+            println!("ts: {:?}", key.get_last_written());
+            for i in 0..key.get_number_of_values().unwrap() {
+                if let Ok(value) = key.get_value_by_index(i) {
+                    println!("\tname: {:?}", value.get_name());
+                    println!("\ttype: {:?}", value.get_type());
+                    match value.get_type() {
+                        Ok(libregf_sys::value::RegfType::String) => {
+                            println!("\tvalue: {:?}", value.get_string())
+                        }
+                        Ok(libregf_sys::value::RegfType::ExpandableString) => {
+                            println!("\t\tvalue: {:?}", value.get_string())
+                        }
+                        Ok(libregf_sys::value::RegfType::Binary) => {
+                            println!("\t\tvalue: {:?}", value.get_binary())
+                        }
+                        _ => (),
+                    }
+                }
+            }
+            if let Ok(ref v) = key.get_sub_keys() {
+                recurse(v);
+            }
+        }
+    }
     #[test]
     fn it_works() {
-        let path = path::PathBuf::from(".test_data/SOFTWARE")
+        let path = path::PathBuf::from(".test_data/config/SECURITY")
             .canonicalize()
             .unwrap();
         if path.exists() {
             if let Some(p) = path.to_str() {
                 let reg_f = libregf_sys::file::RegfFile::open(p);
                 if let Ok(f) = reg_f {
-                    println!("{:?}", f.root_node().unwrap().get_sub_keys());
+                    if let Ok(ref keys) = f.root_node().unwrap().get_sub_keys() {
+                        recurse(keys);
+
+                        // for key in keys {
+                        //     // println!("{:?}", key);
+                        //     println!("{:?}", key.get_name());
+                        //     println!("ts: {:?}", key.get_last_written());
+                        //     for i in 0..key.get_number_of_values().unwrap() {
+                        //         if let Ok(value) = key.get_value_by_index(i) {
+                        //             println!("\t name: {:?}", value.get_name());
+                        //             println!("\t type: {:?}", value.get_type());
+                        //             match value.get_type() {
+                        //                 Ok(libregf_sys::value::RegfType::String) => {
+                        //                     println!("\t{:?}", value.get_string())
+                        //                 }
+                        //                 Ok(libregf_sys::value::RegfType::ExpandableString) => {
+                        //                     println!("\t\tvalue: {:?}", value.get_string())
+                        //                 }
+                        //                 Ok(libregf_sys::value::RegfType::Binary) => {
+                        //                     println!("\t\tvalue: {:?}", value.get_binary())
+                        //                 }
+                        //                 _ => (),
+                        //             }
+                        //         }
+                        //     }
+                        // }
+                    }
                 }
             }
         }

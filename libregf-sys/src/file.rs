@@ -70,21 +70,27 @@ mod unsafe_fn {
         let chars: *mut i8 = cstring_path.into_raw();
         let mut err: *mut libregf_error_t = ptr::null_mut();
         match libregf_check_file_signature(chars, &mut err) == 1 {
-            true => match libregf_file_initialize(&mut file.inner, &mut err) == 1 {
-                true => {
-                    match libregf_file_open(
-                        file.inner,
-                        chars,
-                        libregf_get_access_flags_read(),
-                        &mut err,
-                    ) == -1
-                    {
-                        true => *error = RegfError::from_ptr(err),
-                        false => (), // File inner is set upon successful run.
+            true => {
+                // match libregf_file_is_corrupted(file.inner, &mut err) {
+                //     -1 => *error = RegfError::from_ptr(err),
+                //     _ =>
+                match libregf_file_initialize(&mut file.inner, &mut err) == 1 {
+                    true => {
+                        match libregf_file_open(
+                            file.inner,
+                            chars,
+                            libregf_get_access_flags_read(),
+                            &mut err,
+                        ) == -1
+                        {
+                            true => *error = RegfError::from_ptr(err),
+                            false => (), // File inner is set upon successful run.
+                        }
                     }
+                    false => *error = RegfError::from_ptr(err),
                 }
-                false => *error = RegfError::from_ptr(err),
-            },
+            }
+            // },
             false => *error = RegfError::from_ptr(err), // do something with err
         }
     }

@@ -1,7 +1,7 @@
 use crate::{handle_err_and_option, key::RegfKey, RegfError};
 use std::{mem, ptr};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RegfType {
     Undefined = 0,
     String = 1,
@@ -151,7 +151,7 @@ impl RegfValue {
     pub fn get_multi_string(&self) -> Result<Vec<String>, RegfError> {
         let mut strings = None;
         let mut error = None;
-        unsafe { unsafe_fn::_value_multi_string(self, &mut strings, &mut error) };
+        unsafe { unsafe_fn::_value_multi_strings(self, &mut strings, &mut error) };
         handle_err_and_option(
             strings,
             error,
@@ -230,40 +230,13 @@ mod unsafe_fn {
     //
     read_string!(
         _value_string,
+        RegfValue,
+        "",
         libregf_value_get_value_utf8_string_size,
         libregf_value_get_value_utf8_string
     );
     //
-    // pub unsafe fn _value_string(
-    //     value: &RegfValue,
-    //     string: &mut Option<String>,
-    //     error: &mut Option<RegfError>,
-    // ) {
-    //     let mut err: *mut libregf_error_t = ptr::null_mut();
-    //     let mut size = 0;
-    //     let mut string_ptr: [u8; 265 * 4] = mem::zeroed();
-    //     match libregf_value_get_value_utf8_string_size(value.inner, &mut size, &mut err) {
-    //         -1 => *error = RegfError::from_ptr(err),
-    //         _ => match size == 0 {
-    //             false => match libregf_value_get_value_utf8_string(
-    //                 value.inner,
-    //                 string_ptr.as_mut_ptr() as *mut u8,
-    //                 size,
-    //                 &mut err,
-    //             ) {
-    //                 -1 => *error = RegfError::from_ptr(err),
-    //                 _ => {
-    //                     *string = std::str::from_utf8(&string_ptr[..size as usize])
-    //                         .map(|s| s.to_string())
-    //                         .ok()
-    //                 }
-    //             },
-    //             true => *string = Some("".to_string()),
-    //         },
-    //     }
-    // }
-    //
-    pub unsafe fn _value_multi_string(
+    pub unsafe fn _value_multi_strings(
         value: &RegfValue,
         strings: &mut Option<Vec<String>>,
         error: &mut Option<RegfError>,
@@ -273,14 +246,20 @@ mod unsafe_fn {
         let mut strings_ptr: [*mut libregf_multi_string_t; 16383 * 4] = mem::zeroed();
         // let mut strings_ptr: *mut libregf_multi_string_t = ptr::null_mut();
         match libregf_multi_string_get_number_of_strings(value.inner, &mut n, &mut err) {
-            -1 => *error = RegfError::from_ptr(err),
+            -1 => {
+                *error = RegfError::from_ptr(err);
+                return;
+            }
             _ => {
                 match libregf_value_get_value_multi_string(
                     value.inner,
                     strings_ptr.as_mut_ptr(), // as *mut *mut libregf_multi_string_t,
                     &mut err,
                 ) {
-                    -1 => *error = RegfError::from_ptr(err),
+                    -1 => {
+                        *error = RegfError::from_ptr(err);
+                        return;
+                    }
                     _ => (), // string_ptrs = Some(Vec::from_raw_parts(strings_ptr, n as usize, n as usize)),
                 }
             }
@@ -294,7 +273,10 @@ mod unsafe_fn {
                 &mut size,
                 &mut err,
             ) {
-                -1 => *error = RegfError::from_ptr(err),
+                -1 => {
+                    *error = RegfError::from_ptr(err);
+                    return;
+                }
                 _ => {
                     let mut string_ptr: [u8; 16383 * 4] = mem::zeroed();
                     match libregf_multi_string_get_utf8_string(
@@ -304,7 +286,10 @@ mod unsafe_fn {
                         size,
                         &mut err,
                     ) {
-                        -1 => *error = RegfError::from_ptr(err),
+                        -1 => {
+                            *error = RegfError::from_ptr(err);
+                            return;
+                        }
                         _ => {
                             if strings.is_none() {
                                 *strings = Some(Vec::new())
@@ -318,6 +303,11 @@ mod unsafe_fn {
                     }
                 }
             }
+        }
+        let mut err: *mut libregf_error_t = ptr::null_mut();
+        if libregf_multi_string_free(strings_ptr.as_mut_ptr(), &mut err) == -1 {
+            *error = RegfError::from_ptr(err);
+            return;
         }
     }
     //
@@ -375,35 +365,13 @@ mod unsafe_fn {
             *error = RegfError::from_ptr(err);
         }
     }
+    // _value_name
+    read_string!(
+        _value_name,
+        RegfValue,
+        "",
+        libregf_value_get_name_size,
+        libregf_value_get_name
+    );
     //
-    pub unsafe fn _value_name(
-        value: &RegfValue,
-        name: &mut Option<String>,
-        error: &mut Option<RegfError>,
-    ) {
-        let mut err: *mut libregf_error_t = ptr::null_mut();
-        let mut size = 0;
-        // https://github.com/libyal/libregf/blob/main/documentation/Windows%20NT%20Registry%20File%20(REGF)%20format.asciidoc#1-overview - 16383 * 4
-        let mut name_ptr: [u8; 16383 * 4] = mem::zeroed();
-        match libregf_value_get_name_size(value.inner, &mut size, &mut err) == 1 {
-            false => *error = RegfError::from_ptr(err),
-            true => match libregf_value_get_name(
-                value.inner,
-                name_ptr.as_mut_ptr() as *mut u8,
-                size,
-                &mut err,
-            ) == 1
-            {
-                false => *error = RegfError::from_ptr(err),
-                true => {
-                    *name = match size == 0 {
-                        true => Some("(default)".to_string()),
-                        false => std::str::from_utf8(&name_ptr[..size as usize])
-                            .map(|s| s.to_string())
-                            .ok(),
-                    }
-                }
-            },
-        }
-    }
 }

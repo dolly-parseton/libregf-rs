@@ -44,6 +44,16 @@ impl RegfKey {
             RegfError::function_returned_none("_key_sub_keys"),
         )
     }
+    pub fn get_sub_key(&self, index: usize) -> Result<Self, RegfError> {
+        let mut sub_keys = None;
+        let mut error = None;
+        unsafe { unsafe_fn::_key_sub_key_by_index(self, index as i32, &mut sub_keys, &mut error) };
+        handle_err_and_option(
+            sub_keys,
+            error,
+            RegfError::function_returned_none("_key_sub_keys"),
+        )
+    }
     pub fn get_sub_keys_len(&self) -> Result<usize, RegfError> {
         let mut sub_keys_n = None;
         let mut error = None;
@@ -140,6 +150,20 @@ mod unsafe_fn {
         libregf_key_get_security_descriptor_size,
         libregf_key_get_security_descriptor
     );
+    //
+    pub unsafe fn _key_sub_key_by_index(
+        key: &RegfKey,
+        index: i32,
+        sub_key: &mut Option<RegfKey>,
+        error: &mut Option<RegfError>,
+    ) {
+        let mut err = ptr::null_mut();
+        let mut sub_key_ptr = ptr::null_mut();
+        match libregf_key_get_sub_key(key.inner, index, &mut sub_key_ptr, &mut err) {
+            -1 => *error = RegfError::from_ptr(err),
+            _ => *sub_key = Some(RegfKey { inner: sub_key_ptr }),
+        }
+    }
     //
     pub unsafe fn _key_sub_keys(
         key: &RegfKey,

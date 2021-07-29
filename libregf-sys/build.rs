@@ -14,30 +14,36 @@ fn main() {
     }
 
     // Clean Source
-    Command::new("./synclibs.sh")
+    let synclib =Command::new("./synclibs.sh")
         .current_dir("./libregf")
         .arg("distclean")
         .output()
         .expect("failed to run ./synclibs.sh during build process.");
+        println!("synclibs: {}", String::from_utf8_lossy(&synclib.stdout));
+        eprintln!("synclibs: {}", String::from_utf8_lossy(&synclib.stderr));
     // Run ./autogen.sh
-    Command::new("./autogen.sh")
+    let autogen = Command::new("./autogen.sh")
         .current_dir("./libregf")
         .output()
-        .expect("an error occured while running ./autogen.sh during build process");
+        .expect("an error occured while running ./autogen.sh during build process"); 
+         println!("autogen: {}", String::from_utf8_lossy(&autogen.stdout));
+        eprintln!("autogen: {}", String::from_utf8_lossy(&autogen.stderr));
     // Run configure with the dst variable
-    Command::new("./configure")
+    let configure =Command::new("./configure")
         .arg("--enable-shared=no")
         .arg("--enable-static-executables=no")
         .arg(format!("--prefix={}", dst.display()))
         .current_dir("./libregf")
         .output()
-        .expect("an error occured while running ./configure during build process");
+        .expect("an error occured while running ./configure during build process");     println!("configure: {}", String::from_utf8_lossy(&configure.stdout));
+        eprintln!("configure: {}", String::from_utf8_lossy(&configure.stderr));
     // Run make to install the lib to the dst directory
-    Command::new("make")
+    let make = Command::new("make")
         .arg("install")
         .current_dir("./libregf")
         .output()
-        .expect("an error occured while running 'make install' during build process");
+        .expect("an error occured while running 'make install' during build process");        println!("make: {}", String::from_utf8_lossy(&make.stdout));
+        eprintln!("make: {}", String::from_utf8_lossy(&make.stderr));
     // Configure rustc
     println!("cargo:root={}", dst.display());
     println!(

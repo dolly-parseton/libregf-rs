@@ -40,11 +40,7 @@ impl Key {
     }
 
     pub fn sub_key(&self, i: usize) -> Result<Option<Self>, Box<dyn error::Error>> {
-        let mut keys = self.key.get_sub_keys()?;
-        if i <= keys.len() {
-            return Ok(Some(keys.remove(i).into()));
-        }
-        Ok(None)
+        Ok(self.key.get_sub_key(i).ok().map(|k| k.into()))
         // .map(|mut v| v.drain(..).map(|k| k.into()).collect())
         // .map_err(|e| e.into())
     }

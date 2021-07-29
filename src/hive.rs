@@ -22,31 +22,67 @@ impl Hive {
     pub fn into_iter(self) -> Result<HiveIterator, Box<dyn std::error::Error>> {
         HiveIterator::from_hive(self)
     }
+    //
+    pub fn root(&self) -> Result<Key, Box<dyn std::error::Error>> {
+        self.file.root_node().map(|k| k.into())
+    }
 }
 
 pub struct HiveIterator {
     pub hive: Hive,
-    // current_parent_path_parts: Vec<Key>,
-    keys: Vec<Key>,
+    state: Vec<u64>,
 }
 
 impl HiveIterator {
-    fn recurse_keys(current_key: RegfKey, iter: &mut Self) -> Result<(), Box<dyn error::Error>> {
-        for key in current_key.get_sub_keys()?.drain(..) {
-            // current_parent_path_parts.push(&key);
-            Self::recurse_keys(key, iter)?;
+    pub fn set_lowest(&mut self, current: &Key) {
+        self.state.push(0);
+        let keys = current.sub_keys();
+        if let Ok(false) = keys.as_ref().map(|ref v| v.is_empty()) {
+            if let Some(k) = keys.map(|mut v| v.pop()).ok().flatten() {
+                self.set_lowest(&k);
+                // self.parent = k
+            }
         }
-        iter.keys.push(current_key.into());
-        Ok(())
+    }
+    pub fn next_key(&mut self) -> Option<Key> {
+        // fn inner(key: &mut Option<Key>, positions: &mut Vec<u64>) {
+        //     if depth != positions.len() {
+        //         if let Ok(Some(k)) = key.sub_key(positions[positions.len() - 1] as usize) {
+        //             inner(k, depth + 1, positions);
+        //         } else {
+        //         }
+        //     }
+        // }
+        // // Go to current +1 to n-1, if some then return else go up a level and + 1 <recurse until success>
+        // let mut path = Vec::new();
+        // inner(self.hive.root()?, &mut key, 0, &self.state);
+        // None
+    }
+    pub fn generate_path(&self) -> Result<String, Box<dyn std::error::Error>> {
+        fn inner(key: Key, path: &mut Vec<String>, depth: usize, positions: &[u64]) {
+            if let Ok(name) = key.name() {
+                path.push(name);
+                if depth != positions.len() {
+                    if let Ok(Some(k)) = key.sub_key(positions[depth] as usize) {
+                        inner(k, path, depth + 1, positions);
+                    }
+                }
+            }
+        }
+        let mut path = Vec::new();
+        inner(self.hive.root()?, &mut path, 0, &self.state);
+        Ok(path.join("/"))
     }
     pub fn from_hive(hive: Hive) -> Result<Self, Box<dyn error::Error>> {
         let mut iter = Self {
             hive,
-            // current_parent_path_parts: Vec::new(),
-            keys: Vec::new(),
+            state: Vec::new(),
         };
-        Self::recurse_keys(iter.hive.file.root_node()?, &mut iter)?;
-        println!("{:?}", iter.keys.len());
+        if let Some(k) = iter.hive.root()?.sub_key(0)? {
+            iter.set_lowest(k);
+        }
+        println!("{:?}", iter.state);
+        println!("{:?}", iter.generate_path());
         // Enumerate all the keys
         Ok(iter)
     }
@@ -57,6 +93,6 @@ impl Iterator for HiveIterator {
     type Item = crate::Key;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.keys.pop().map(|k| k.into())
+        None
     }
 }

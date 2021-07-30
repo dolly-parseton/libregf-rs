@@ -1,17 +1,17 @@
 use chrono::{DateTime, Utc};
 use libregf_sys::{key::RegfKey, value::RegfValue};
-use std::error;
+use std::{convert::TryFrom, error};
 
 #[derive(Debug)]
 pub struct Key {
     pub path_parts: Vec<String>,
-    pub key: RegfKey,
+    inner: RegfKey,
 }
 
 impl From<RegfKey> for Key {
-    fn from(key: RegfKey) -> Self {
+    fn from(inner: RegfKey) -> Self {
         Self {
-            key,
+            inner,
             path_parts: Vec::new(),
         }
     }
@@ -19,47 +19,43 @@ impl From<RegfKey> for Key {
 
 impl Key {
     pub fn from_parents(
-        current: RegfKey,
-        parents: &Vec<&RegfKey>,
+        inner: RegfKey,
+        parents: &[RegfKey],
     ) -> Result<Self, Box<dyn error::Error>> {
         let mut path_parts = Vec::new();
         for part in parents.iter().map(|p| p.get_name()) {
             path_parts.push(part?);
         }
-        Ok(Self {
-            path_parts,
-            key: current,
-        })
+        Ok(Self { path_parts, inner })
     }
 
     pub fn sub_keys(&self) -> Result<Vec<Self>, Box<dyn error::Error>> {
-        self.key
+        self.inner
             .get_sub_keys()
             .map(|mut v| v.drain(..).map(|k| k.into()).collect())
             .map_err(|e| e.into())
     }
 
     pub fn sub_key(&self, i: usize) -> Result<Option<Self>, Box<dyn error::Error>> {
-        let len = self.sub_keys_len();
-        if let Ok(true) = self.sub_keys_len().map(|l| (i >= 0 && i < l)) {
-            Ok(self.key.get_sub_key(i).ok().map(|k| k.into()))
+        if let Ok(true) = self.sub_keys_len().map(|l| i < l) {
+            Ok(self.inner.get_sub_key(i).ok().map(|k| k.into()))
         } else {
             Ok(None)
         }
     }
 
     pub fn sub_keys_len(&self) -> Result<usize, Box<dyn error::Error>> {
-        self.key.get_sub_keys_len().map_err(|e| e.into())
+        self.inner.get_sub_keys_len().map_err(|e| e.into())
     }
 
     pub fn name(&self) -> Result<String, Box<dyn error::Error>> {
-        self.key.get_name().map_err(|e| e.into())
+        self.inner.get_name().map_err(|e| e.into())
     }
 
     pub fn last_modified(&self) -> Result<DateTime<Utc>, Box<dyn error::Error>> {
         use std::convert::TryInto;
         Ok(crate::epoch_to_timestamp(
-            self.key.get_last_written()?.try_into()?,
+            self.inner.get_last_written()?.try_into()?,
         ))
     }
 }

@@ -1,7 +1,7 @@
 //
 use crate::kv::Key;
-use libregf_sys::{file::RegfFile, key::RegfKey};
-use std::{error, path};
+use libregf_sys::file::RegfFile;
+use std::path;
 //
 #[derive(Debug)]
 pub struct Hive {
@@ -19,128 +19,125 @@ impl Hive {
         }
     }
     //
-    pub fn into_iter(self) -> Result<HiveIterator, Box<dyn std::error::Error>> {
-        HiveIterator::from_hive(self)
-    }
-    //
     pub fn root(&self) -> Result<Key, Box<dyn std::error::Error>> {
         self.file.root_node().map(|k| k.into())
     }
 }
 
+impl IntoIterator for Hive {
+    type Item = Result<crate::Key, Box<dyn std::error::Error>>;
+    type IntoIter = HiveIterator;
+    fn into_iter(self) -> Self::IntoIter {
+        Self::IntoIter::from_hive(self)
+    }
+}
+
 pub struct HiveIterator {
-    pub hive: Hive,
-    state: Vec<u64>,
+    hive: Hive,
+    state: Vec<usize>,
+    parents: Vec<Key>,
+    started: bool,
+    done: bool,
 }
 
 impl HiveIterator {
-    pub fn set_lowest(&mut self, current: &Key) {
-        self.state.push(0);
-        let keys = current.sub_keys();
-        if let Ok(false) = keys.as_ref().map(|ref v| v.is_empty()) {
-            if let Some(k) = keys.map(|mut v| v.pop()).ok().flatten() {
-                self.set_lowest(&k);
-                // self.parent = k
-            }
-        }
-    }
-    pub fn seek_lowest(&mut self, current: &Key) {
-        if let Ok(true) = current.sub_keys_len().map(|l| l != 0) {
-            if let Ok(Some(k)) = current.sub_key(0) {
-                self.state.push(0);
-                self.seek_lowest(&k);
-            }
-        }
-    }
-    pub fn next_key(&mut self) -> Option<Result<Key, Box<dyn std::error::Error>>> {
-        fn get_current_parent(
-            current: &mut Option<Key>,
-            key: Key,
-            depth: usize,
-            positions: &[u64],
-        ) -> Option<Key> {
-            if depth != positions.len() - 1 && positions.len() > 0 {
-                if let Ok(Some(k)) = key.sub_key(positions[depth] as usize) {
-                    // println!("{}, {}, {:?}", depth, positions[depth], k);
-                    get_current_parent(current, k, depth + 1, positions);
-                }
-            } else {
-                *current = Some(key);
-            }
-            None
-        }
-        fn inner(iter: &mut HiveIterator, key: &mut Option<Key>) -> Result<(), ()> {
-            // See if there is another key ahead of the current
-            if let Some(Ok(Some(k))) = key
-                .as_ref()
-                .map(|k| k.sub_key((iter.state[iter.state.len() - 1] + 1) as usize))
-            {
-                let len = iter.state.len();
-                println!("INNER BEFORE: {:?}, {:?}", iter.state, k);
-                iter.state[(len - 1) as usize] = iter.state[iter.state.len() - 1] + 1;
-                iter.seek_lowest(&k);
-                println!("INNER AFTER: {:?}, {:?}", iter.state, k);
-                *key = Some(k);
-            } else {
-                // Go back up one and return states current.
-                iter.state.pop();
-                println!("INNER UP ONE: {:?}, {:?}", iter.state, key);
-                get_current_parent(key, iter.hive.root().map_err(|_| ())?, 0, &iter.state);
-                // inner(iter, key)?;
-                if let Some(Ok(Some(k))) = key
-                    .as_ref()
-                    .map(|k| k.sub_key((iter.state[iter.state.len() - 1]) as usize))
-                {
-                    *key = Some(k);
+    pub fn seek_lowest(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        fn inner(iter: &mut HiveIterator) -> Result<(), Box<dyn std::error::Error>> {
+            if let Some(p) = iter.state.last() {
+                if let Some(k) = match iter.parents.last() {
+                    Some(k) => k.sub_key(*p)?,
+                    None => iter.hive.root()?.sub_key(*p)?,
+                } {
+                    if k.sub_keys_len()? != 0 {
+                        iter.state.push(0);
+                        iter.parents.push(k);
+                        inner(iter)?;
+                    }
                 }
             }
             Ok(())
         }
-        let mut key = None;
-        get_current_parent(&mut key, self.hive.root().ok()?, 0, &self.state);
-        // println!("{:?}", key);
-        inner(self, &mut key);
-        match (key.as_mut(), self.generate_path_parts()) {
-            (Some(mut k), Ok(v)) => k.path_parts = v,
+        inner(self)
+    }
+    pub fn next_key(&mut self) -> Result<Option<Key>, Box<dyn std::error::Error>> {
+        match (self.started, self.state.is_empty(), self.done) {
+            (false, true, _) => {
+                if self.hive.root()?.sub_keys_len()? != 0 {
+                    self.state.push(0);
+                    self.seek_lowest()?;
+                }
+                self.started = true;
+            }
+            (true, true, false) => {
+                self.done = true;
+                return self.hive.root().map(|mut k| {
+                    k.path_parts.push("ROOT".into());
+                    Some(k)
+                });
+            }
+            (true, true, true) => {
+                return Ok(None);
+            }
             _ => (),
         }
-        key.map(Ok)
-    }
-    pub fn generate_path_parts(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        fn inner(key: Key, path: &mut Vec<String>, depth: usize, positions: &[u64]) {
-            if let Ok(name) = key.name() {
-                path.push(name);
-                if depth != positions.len() {
-                    if let Ok(Some(k)) = key.sub_key(positions[depth] as usize) {
-                        inner(k, path, depth + 1, positions);
-                    }
-                }
+        // Store current
+        let current = match match (self.parents.last(), self.state.last()) {
+            (Some(k), Some(p)) => k.sub_key(*p)?,
+            (None, Some(p)) => self.hive.root()?.sub_key(*p)?,
+            _ => None,
+        } {
+            Some(mut k) => {
+                self.set_key_path(&mut k)?;
+                Some(k)
             }
-        }
-        let mut path = Vec::new();
-        inner(self.hive.root()?, &mut path, 0, &self.state);
-        Ok(path)
+            None => None,
+        };
+        // Next key
+        match match (self.parents.last(), self.state.last()) {
+            (Some(k), Some(p)) => *p + 1 < k.sub_keys_len()?,
+            (None, Some(p)) => *p + 1 < self.hive.root()?.sub_keys_len()?,
+            _ => false,
+        } {
+            true => {
+                self.state.last_mut().map(|p| {
+                    *p += 1;
+                    p
+                });
+                self.seek_lowest()?;
+            }
+            false => {
+                self.state.pop();
+                self.parents.pop();
+            }
+        };
+        Ok(current)
     }
-    pub fn from_hive(hive: Hive) -> Result<Self, Box<dyn error::Error>> {
-        let mut iter = Self {
+    pub fn set_key_path(&self, current: &mut Key) -> Result<(), Box<dyn std::error::Error>> {
+        current.path_parts.push(self.hive.root()?.name()?);
+        for parent in &self.parents {
+            current.path_parts.push(parent.name()?);
+        }
+        current.path_parts.push(current.name()?);
+        Ok(())
+    }
+    pub fn from_hive(hive: Hive) -> Self {
+        Self {
             hive,
             state: Vec::new(),
-        };
-        if let Some(k) = iter.hive.root()?.sub_key(0)? {
-            iter.set_lowest(&k);
+            parents: Vec::new(),
+            started: false,
+            done: false,
         }
-        println!("{:?}", iter.state);
-        println!("{:?}", iter.generate_path_parts());
-        // Enumerate all the keys
-        Ok(iter)
     }
 }
 
 impl Iterator for HiveIterator {
-    // we will be counting with usize
     type Item = Result<crate::Key, Box<dyn std::error::Error>>;
-
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_key()
+        match self.next_key() {
+            Ok(Some(k)) => Some(Ok(k)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
     }
 }

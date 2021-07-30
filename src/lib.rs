@@ -66,24 +66,11 @@ mod tests {
             .canonicalize()
             .unwrap();
         let hive = Hive::from_path(path).unwrap();
-        let mut iter = hive.into_iter().unwrap();
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
-        // println!("{:?}", iter.next());
+        let mut iter = hive.into_iter();
         for key in iter {
-            println!("{:?}", key);
-            // std::thread::sleep(std::time::Duration::from_millis(25));
+            print!("Item {:?}", key);
+            println!(" {:?}", key.unwrap().name());
+            // std::thread::sleep(std::time::Duration::from_millis(2));
         }
         println!("{:?}", dt.elapsed());
         assert_eq!(false, true);

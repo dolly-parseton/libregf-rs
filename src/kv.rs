@@ -40,9 +40,12 @@ impl Key {
     }
 
     pub fn sub_key(&self, i: usize) -> Result<Option<Self>, Box<dyn error::Error>> {
-        Ok(self.key.get_sub_key(i).ok().map(|k| k.into()))
-        // .map(|mut v| v.drain(..).map(|k| k.into()).collect())
-        // .map_err(|e| e.into())
+        let len = self.sub_keys_len();
+        if let Ok(true) = self.sub_keys_len().map(|l| (i >= 0 && i < l)) {
+            Ok(self.key.get_sub_key(i).ok().map(|k| k.into()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn sub_keys_len(&self) -> Result<usize, Box<dyn error::Error>> {

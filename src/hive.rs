@@ -44,21 +44,69 @@ impl HiveIterator {
             }
         }
     }
-    pub fn next_key(&mut self) -> Option<Key> {
-        // fn inner(key: &mut Option<Key>, positions: &mut Vec<u64>) {
-        //     if depth != positions.len() {
-        //         if let Ok(Some(k)) = key.sub_key(positions[positions.len() - 1] as usize) {
-        //             inner(k, depth + 1, positions);
-        //         } else {
-        //         }
-        //     }
-        // }
-        // // Go to current +1 to n-1, if some then return else go up a level and + 1 <recurse until success>
-        // let mut path = Vec::new();
-        // inner(self.hive.root()?, &mut key, 0, &self.state);
-        // None
+    pub fn seek_lowest(&mut self, current: &Key) {
+        if let Ok(true) = current.sub_keys_len().map(|l| l != 0) {
+            if let Ok(Some(k)) = current.sub_key(0) {
+                self.state.push(0);
+                self.seek_lowest(&k);
+            }
+        }
     }
-    pub fn generate_path(&self) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn next_key(&mut self) -> Option<Result<Key, Box<dyn std::error::Error>>> {
+        fn get_current_parent(
+            current: &mut Option<Key>,
+            key: Key,
+            depth: usize,
+            positions: &[u64],
+        ) -> Option<Key> {
+            if depth != positions.len() - 1 && positions.len() > 0 {
+                if let Ok(Some(k)) = key.sub_key(positions[depth] as usize) {
+                    // println!("{}, {}, {:?}", depth, positions[depth], k);
+                    get_current_parent(current, k, depth + 1, positions);
+                }
+            } else {
+                *current = Some(key);
+            }
+            None
+        }
+        fn inner(iter: &mut HiveIterator, key: &mut Option<Key>) -> Result<(), ()> {
+            // See if there is another key ahead of the current
+            if let Some(Ok(Some(k))) = key
+                .as_ref()
+                .map(|k| k.sub_key((iter.state[iter.state.len() - 1] + 1) as usize))
+            {
+                let len = iter.state.len();
+                println!("INNER BEFORE: {:?}, {:?}", iter.state, k);
+                iter.state[(len - 1) as usize] = iter.state[iter.state.len() - 1] + 1;
+                iter.seek_lowest(&k);
+                println!("INNER AFTER: {:?}, {:?}", iter.state, k);
+                *key = Some(k);
+            } else {
+                // Go back up one and return states current.
+                iter.state.pop();
+                println!("INNER UP ONE: {:?}, {:?}", iter.state, key);
+                get_current_parent(key, iter.hive.root().map_err(|_| ())?, 0, &iter.state);
+                // inner(iter, key)?;
+                if let Some(Ok(Some(k))) = key
+                    .as_ref()
+                    .map(|k| k.sub_key((iter.state[iter.state.len() - 1]) as usize))
+                {
+                    *key = Some(k);
+                }
+            }
+            Ok(())
+        }
+        let mut key = None;
+        get_current_parent(&mut key, self.hive.root().ok()?, 0, &self.state);
+        // println!("{:?}", key);
+        inner(self, &mut key);
+        match (key.as_mut(), self.generate_path_parts()) {
+            (Some(mut k), Ok(v)) => k.path_parts = v,
+            _ => (),
+        }
+        key.map(Ok)
+    }
+    pub fn generate_path_parts(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         fn inner(key: Key, path: &mut Vec<String>, depth: usize, positions: &[u64]) {
             if let Ok(name) = key.name() {
                 path.push(name);
@@ -71,7 +119,7 @@ impl HiveIterator {
         }
         let mut path = Vec::new();
         inner(self.hive.root()?, &mut path, 0, &self.state);
-        Ok(path.join("/"))
+        Ok(path)
     }
     pub fn from_hive(hive: Hive) -> Result<Self, Box<dyn error::Error>> {
         let mut iter = Self {
@@ -79,10 +127,10 @@ impl HiveIterator {
             state: Vec::new(),
         };
         if let Some(k) = iter.hive.root()?.sub_key(0)? {
-            iter.set_lowest(k);
+            iter.set_lowest(&k);
         }
         println!("{:?}", iter.state);
-        println!("{:?}", iter.generate_path());
+        println!("{:?}", iter.generate_path_parts());
         // Enumerate all the keys
         Ok(iter)
     }
@@ -90,9 +138,9 @@ impl HiveIterator {
 
 impl Iterator for HiveIterator {
     // we will be counting with usize
-    type Item = crate::Key;
+    type Item = Result<crate::Key, Box<dyn std::error::Error>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        None
+        self.next_key()
     }
 }
